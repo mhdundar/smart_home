@@ -1,7 +1,6 @@
 // ignore_for_file: avoid_print
 
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,53 +18,82 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  BluetoothState _bluetoothState = BluetoothState.UNKNOWN;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  final FlutterBluetoothSerial _bluetooth = FlutterBluetoothSerial.instance;
+  var _bluetoothState = BluetoothState.UNKNOWN;
+  var _deviceState = 0;
+  var isDisconnecting = false;
+
+  var _connected = false;
+  var _isButtonUnavailable = false;
+  var _devicesList = <BluetoothDevice>[];
+
   BluetoothConnection? connection;
-
-  int? _deviceState;
-  bool isDisconnecting = false;
-
-  bool? get isConnected => connection?.isConnected;
-
-  List<BluetoothDevice> _devicesList = [];
   BluetoothDevice? _device;
-  bool _connected = false;
-  bool _isButtonUnavailable = false;
+
+  void listenConnection() {
+    connection!.input?.listen((data) {
+      print(data);
+
+      // var raw = cleanPrefix(data);
+
+      // if (kDebugMode) {
+      //   print(raw);
+      //   print(ascii.decode(raw));
+      //   setState(() {
+      //     incomeData += ascii.decode(raw) + "\n";
+      //   });
+      // }
+
+      // if (raw.isEmpty) {
+      //   return;
+      // }
+
+      // switch (raw[0]) {
+      //   // Status
+      //   case 100:
+      //     setState(() => status = candc(data));
+      //     break;
+
+      //   // Moise
+      //   case 110:
+      //     setState(() => moisture = candc(data));
+      //     break;
+
+      //   // Temp
+      //   case 115:
+      //     setState(() => temperature = candc(data));
+      //     break;
+
+      //   // Time
+      //   case 116:
+      //     setState(() => time = candc(data));
+      //     break;
+      // }
+    }).onDone(() => Navigator.of(context).pop());
+  }
 
   @override
   void initState() {
     super.initState();
+
     FlutterBluetoothSerial.instance.state.then((state) {
       setState(() {
         _bluetoothState = state;
       });
     });
 
-    _deviceState = 0; // neutral
     enableBluetooth();
 
     FlutterBluetoothSerial.instance.onStateChanged().listen((state) {
       setState(() {
         _bluetoothState = state;
+
         if (_bluetoothState == BluetoothState.STATE_OFF) {
           _isButtonUnavailable = true;
         }
+
         getPairedDevices();
       });
     });
-  }
-
-  @override
-  void dispose() {
-    // Avoid memory leak and disconnect
-    if (isConnected != null) {
-      isDisconnecting = true;
-      connection?.dispose();
-    }
-
-    super.dispose();
   }
 
   // Request Bluetooth permission from the user
@@ -89,7 +117,7 @@ class _MyAppState extends State<MyApp> {
     List<BluetoothDevice> devices = [];
 
     try {
-      devices = await _bluetooth.getBondedDevices();
+      devices = await FlutterBluetoothSerial.instance.getBondedDevices();
     } on PlatformException {
       print('Error');
     }
@@ -107,7 +135,6 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       home: Scaffold(
-        key: _scaffoldKey,
         appBar: AppBar(
           title: const Text('Flutter Bluetooth'),
           backgroundColor: Colors.deepPurple,
@@ -204,11 +231,13 @@ class _MyAppState extends State<MyApp> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          DropdownButton(
+                          DropdownButton<BluetoothDevice>(
                             items: _getDeviceItems(),
-                            onChanged: (value) => setState(
-                              () => _device = value as BluetoothDevice,
-                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                _device = value;
+                              });
+                            },
                             value: _devicesList.isNotEmpty ? _device : null,
                           ),
                           ElevatedButton(
@@ -472,17 +501,19 @@ class _MyAppState extends State<MyApp> {
       _isButtonUnavailable = true;
     });
 
-    await BluetoothConnection.toAddress(_device?.address).then((_connection) {
+    try {
+      connection = await BluetoothConnection.toAddress(_device?.address);
       print('Connected to the device');
-      connection = _connection;
+      listenConnection();
+
       setState(() {
         _connected = true;
       });
-    }).catchError((error) {
+    } catch (e) {
       print('Cannot connect, exception occurred');
-      print(error);
-    });
-    setState(() => _isButtonUnavailable = false);
+      print(e);
+      setState(() => _isButtonUnavailable = false);
+    }
   }
 
   Future<void> _disconnect() async {
